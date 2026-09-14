@@ -40,6 +40,10 @@ La prioridad es una **solución práctica y utilizable**, no únicamente la máx
   augmentation) únicamente si el EDA demuestra una limitación real del dataset
   original, manteniendo siempre el espíritu del proyecto.
 
+> **Nota:** el dataset no se incluye en este repositorio (no es propiedad del
+> proyecto). Para reproducir el análisis, descarga `youtoxic_english_1000.csv`
+> y colócalo dentro de la carpeta `data/`.
+
 ## Objetivo del modelo
 
 Clasificación binaria: dado un comentario de YouTube, predecir si contiene discurso

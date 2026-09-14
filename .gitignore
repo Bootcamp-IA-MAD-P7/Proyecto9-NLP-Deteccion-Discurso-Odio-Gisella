@@ -33,3 +33,6 @@ build/
 
 # Local data / generated files
 data/processed/
+
+# Dataset (no es propiedad del proyecto, se descarga aparte)
+data/*.csv
