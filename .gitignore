@@ -36,3 +36,5 @@ data/processed/
 
 # Dataset (no es propiedad del proyecto, se descarga aparte)
 data/*.csv
+
+models/*.pkl 
