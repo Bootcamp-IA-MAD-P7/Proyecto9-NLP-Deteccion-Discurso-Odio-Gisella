@@ -9,16 +9,25 @@ nltk.download('punkt_tab')
 nltk.download('wordnet')
 nltk.download('omw-1.4')
 
-# Cargamos modelo y vectorizador entrenados
+# Load trained model and vectorizer
 best_rf = joblib.load('models/random_forest_toxic_model.pkl')
 tfidf = joblib.load('models/tfidf_vectorizer.pkl')
 lemmatizer = WordNetLemmatizer()
 
+
 def tokenize_and_lemmatize(text):
+    """
+    Tokenize the input text and lemmatize each token.
+    """
     tokens = word_tokenize(text)
     return [lemmatizer.lemmatize(token) for token in tokens]
 
+
 def predecir_toxicidad(comentario):
+    """
+    Predict whether a comment is toxic using the trained model.
+    Returns the predicted label and the class probabilities.
+    """
     tokens = tokenize_and_lemmatize(comentario)
     tokens_text = ' '.join(tokens)
     vector = tfidf.transform([tokens_text])
@@ -26,7 +35,8 @@ def predecir_toxicidad(comentario):
     probabilidad = best_rf.predict_proba(vector)[0]
     return prediccion, probabilidad
 
-# --- Interfaz ---
+
+# --- UI ---
 st.title("HateShield - Detector de Comentarios Tóxicos")
 st.write("Escribe un comentario en inglés para analizar si es tóxico o no.")
 
