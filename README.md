@@ -15,7 +15,6 @@ de un cliente que necesita escalar su proceso de moderación.
 - [Pipeline y resultados](#pipeline-y-resultados)
 - [Roadmap por niveles](#roadmap-por-niveles)
 - [Flujo de trabajo (Git/Kanban)](#flujo-de-trabajo-gitkanban)
-- [Fechas clave](#fechas-clave)
 - [Estado actual](#estado-actual)
 
 ---
@@ -36,15 +35,12 @@ La prioridad es una **solución práctica y utilizable**, no únicamente la máx
 - **Registros:** 1000 comentarios originales → 997 tras eliminar 3 duplicados exactos
   por texto. Sin valores nulos ni comentarios vacíos.
 - **Variable objetivo:** `IsToxic` (459 positivos / 538 negativos → 46.0% / 54.0%,
-  dataset razonablemente balanceado). Se descartó `IsHatespeech` por recomendación
-  del profesor, al ser una categoría más específica y menos representada dentro del
-  dataset; `IsToxic` ofrece una señal más completa para el problema de negocio.
+  dataset razonablemente balanceado). Se descartó `IsHatespeech`, al ser una
+  categoría más específica y menos representada dentro del dataset; `IsToxic`
+  ofrece una señal más completa para el problema de negocio.
 - Se valoró ampliar el dataset (otro dataset público, web scraping o data
   augmentation), pero el EDA no mostró una limitación real que lo justificara, por lo
   que se mantiene el dataset original.
-
-> **Nota:** el dataset no se incluye en este repositorio. Para reproducir el análisis,
-> descarga `youtoxic_english_1000.csv` y colócalo dentro de la carpeta `data/`.
 
 ## Objetivo del modelo
 
@@ -61,10 +57,12 @@ el mejor equilibrio entre rendimiento en la clase tóxica y control del overfitt
 | Lenguaje                            | Python 3.12                                                         |
 | Manipulación de datos               | Pandas                                                              |
 | NLP clásico                         | NLTK, regex                                                         |
-| Vectorización                       | TF-IDF (unigramas + bigramas)                                       |
+| Vectorización                       | TF-IDF (unigramas)                                                   |
 | Machine Learning                    | scikit-learn (Regresión Logística, Naive Bayes, SVM, Random Forest) |
 | Ajuste de hiperparámetros           | GridSearchCV                                                        |
-| Ensemble                            | Random Forest (modelo final)                                        |
+| Ensemble                            | VotingClassifier (hard voting: Regresión Logística + Naive Bayes + SVM) — modelo final |
+| Testing                             | pytest                                                              |
+| Integración YouTube                 | youtube-comment-downloader                                          |
 | Deep Learning (nivel avanzado)      | RNN / LSTM — pendiente                                              |
 | Transformers (nivel experto)        | Hugging Face — pendiente                                            |
 | Aplicación                          | Streamlit                                                           |
@@ -83,7 +81,12 @@ Proyecto9-NLP-Deteccion-Discurso-Odio-Gisella/
 │   ├── 02_preprocesamiento.ipynb
 │   └── 03_evaluacion_comentarios_reales.ipynb
 ├── app/                   # Aplicación Streamlit
-│   └── app.py
+│   ├── app.py
+│   ├── utils.py           # Limpieza de texto y predicción (importable, sin efectos de Streamlit)
+│   └── youtube_utils.py   # Descarga y análisis en lote de comentarios de YouTube
+├── tests/                 # Tests unitarios (pytest)
+│   ├── conftest.py
+│   └── test_utils.py
 ├── models/                # Modelos entrenados serializados (no versionado)
 ├── requirements.txt       # Dependencias del proyecto
 └── README.md
@@ -100,9 +103,18 @@ python -m venv .venv
 
 # Instalar dependencias
 pip install -r requirements.txt
+```
 
+> **Nota:** el dataset no se incluye en este repositorio. Para reproducir el
+> análisis, descarga `youtoxic_english_1000.csv` y colócalo dentro de la carpeta
+> `data/`.
+
+```bash
 # Lanzar la aplicación
 streamlit run app/app.py
+
+# Ejecutar los tests unitarios
+pytest tests/ -v
 ```
 
 ## Pipeline y resultados
@@ -116,36 +128,60 @@ streamlit run app/app.py
    URLs, caracteres especiales), stopwords personalizadas (se conservan negaciones e
    intensificadores como "not", "never", "very"), tokenización y lematización con
    NLTK.
-3. **Vectorización**: TF-IDF (max_features=5000, ngram_range=(1,2), min_df=2).
-4. **Modelado**: se compararon Logistic Regression, Naive Bayes, SVM y Random Forest.
-   Modelo ganador: **Random Forest** optimizado con GridSearchCV
-   (`max_depth=30, min_samples_split=5, n_estimators=100`) → **F1 (clase tóxico) =
-   0.67, accuracy = 0.72**.
-5. **Evaluación con comentarios reales** (`03_evaluacion_comentarios_reales.ipynb`):
+3. **Vectorización y detección de overfitting**: la configuración inicial de TF-IDF
+   (max_features=5000, ngram_range=(1,2), min_df=2) generaba una alta
+   dimensionalidad (2646 variables para solo 797 comentarios de entrenamiento), lo
+   que producía overfitting severo (16-37 puntos de diferencia train/test) en los
+   cuatro modelos comparados. Se ajustó a **max_features=1000, ngram_range=(1,1)
+   (solo unigramas), min_df=5**, reduciendo el problema aunque sin eliminarlo del
+   todo.
+4. **Metodología de evaluación**: en lugar de comparar el rendimiento en train "en
+   bruto" contra test, se comparó el **F1 de validación cruzada (5-fold) frente al
+   F1 de test**, una medida más rigurosa y justa de la capacidad de generalización
+   (usa en cada fold datos no vistos durante el entrenamiento).
+5. **Modelado y selección del modelo final**: se compararon Logistic Regression,
+   Naive Bayes, SVM y Random Forest (este último optimizado con GridSearchCV). El
+   modelo final es un **ensemble VotingClassifier (hard voting)** de Logistic
+   Regression, Naive Bayes y SVM. Random Forest quedó descartado por peor
+   overfitting (8.60 puntos CV vs test) y peor F1 en test (0.57). Resultado del
+   ensemble: **F1 (test) = 0.6322**, overfitting CV vs test = **4.64 puntos**
+   (dentro del umbral de 5 puntos definido como aceptable).
+6. **Evaluación con comentarios reales** (`03_evaluacion_comentarios_reales.ipynb`):
    10 comentarios reales de YouTube (fuente: Sage Journals) con etiqueta esperada
-   conocida → **7/10 aciertos**. El modelo detecta el 100% de los no tóxicos y 2/5
-   de los tóxicos: acierta cuando hay vocabulario explícitamente ofensivo, pero falla
-   con insultos sutiles sin palabrotas ("She is a brat.", "What a spoiled child").
-   Esto es coherente con el recall de 0.61 de la clase tóxica y es una limitación
-   documentada del modelo (TF-IDF no capta contexto semántico ni tono).
+   conocida. Se detectó y corrigió una inconsistencia en el pipeline de predicción
+   (`predecir_toxicidad` no aplicaba `clean_text()` antes de tokenizar, a diferencia
+   del pipeline de entrenamiento); tras corregirla, el resultado real es **2 de 5
+   comentarios tóxicos detectados**. El modelo acierta cuando hay vocabulario
+   explícitamente ofensivo, pero falla con insultos sutiles o coloquiales sin
+   palabrotas explícitas. Es una limitación documentada y coherente con el F1 de
+   0.63 de la clase tóxica (TF-IDF no capta contexto semántico ni tono).
+7. **Tests unitarios** (`tests/test_utils.py`): 14 tests con pytest sobre
+   `clean_text`, `tokenize_and_lemmatize` y `predecir_toxicidad`, usando dobles de
+   prueba para el ensemble y el vectorizador, de forma que los tests no dependen de
+   los modelos ya entrenados.
+8. **Integración con YouTube** (`app/youtube_utils.py`): dado el enlace de un
+   vídeo, se extrae el ID, se descargan sus comentarios reales con
+   `youtube-comment-downloader` y se analizan en lote con el mismo pipeline de
+   predicción. Integrado en la app de Streamlit con un campo de URL, un selector
+   del número de comentarios a analizar y una tabla de resultados.
 
 ## Roadmap por niveles
 
 ### 🟢 Nivel esencial
 
 - [x] Modelo de ML que detecte comentarios tóxicos
-- [ ] Overfitting controlado (diferencia train/test < 5 puntos) — pendiente de
-      verificación explícita
+- [x] Overfitting controlado y documentado (comparación F1 CV vs test, 4.64 puntos
+      de diferencia en el modelo final, dentro del umbral de 5 puntos)
 - [x] Aplicación funcional (Streamlit) para consultar si un mensaje es tóxico
 - [x] Repositorio Git organizado, commits limpios y descriptivos
 - [x] Documentación y README
 
 ### 🟡 Nivel medio
 
-- [ ] Modelo con técnicas de ensemble adicionales (Voting/Stacking) — Random Forest
-      ya es un ensemble, se valorará si se amplía
-- [ ] Detección a partir de la URL de un vídeo de YouTube
-- [ ] Tests unitarios
+- [x] Modelo con técnicas de ensemble (VotingClassifier: Logistic Regression +
+      Naive Bayes + SVM)
+- [x] Detección de comentarios tóxicos a partir de la URL de un vídeo de YouTube
+- [x] Tests unitarios (pytest)
 - [x] Ajuste de hiperparámetros (GridSearchCV)
 
 ### 🟠 Nivel avanzado
@@ -168,13 +204,8 @@ streamlit run app/app.py
 - **Flujo:** Issue → rama de funcionalidad → commit → Pull Request → `developer` →
   `main`.
 - **Idiomas:** código, commits y Pull Requests en inglés; documentación en español.
-- **Gestión de tareas:** tablero Kanban en GitHub Projects (Backlog → To Do →
-  In Progress → Review → Done).
-
-## Fechas clave
-
-- **Entrega:** 22 de septiembre de 2026
-- **Presentación (presencial):** 23 de septiembre de 2026
+- **Gestión de tareas:** tablero Kanban en GitHub Projects (Todo → In Progress →
+  Done).
 
 ## Estado actual
 
@@ -183,9 +214,11 @@ streamlit run app/app.py
 - [x] Variable objetivo decidida (`IsToxic`)
 - [x] EDA completo
 - [x] Preprocesamiento NLP
-- [x] Vectorización (TF-IDF)
+- [x] Vectorización (TF-IDF) ajustada tras detectar overfitting
 - [x] Entrenamiento y comparación de modelos (4 algoritmos + GridSearchCV)
-- [x] Evaluación con comentarios reales de YouTube
-- [x] Aplicación Streamlit funcional
-- [ ] Verificación explícita de overfitting (train vs test)
-- [ ] Nivel medio: tests unitarios, integración por URL de vídeo
+- [x] Modelo final: ensemble VotingClassifier (hard voting)
+- [x] Overfitting verificado y documentado (F1 CV vs test)
+- [x] Evaluación con comentarios reales de YouTube (pipeline corregido)
+- [x] Aplicación Streamlit funcional (análisis de comentario individual)
+- [x] Tests unitarios (pytest) sobre `utils.py`
+- [x] Integración con YouTube: análisis en lote de comentarios reales por URL
